@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import AuthModal from '@/components/AuthModal'
+import UsageIndicator from '@/components/UsageIndicator'
 
 export interface Document {
   id: string
@@ -12,6 +14,87 @@ export interface Document {
   type: 'pdf' | 'url' | 'youtube'
   originalUrl?: string
   content: string
+  userId: string
+}
+
+export interface User {
+  id: string
+  email: string
+  name: string
+  createdAt: string
+  lastLogin?: string
+  emailVerified: boolean
+}
+
+export interface DailyUsage {
+  userId: string
+  date: string
+  requests: number
+  maxRequests: number
+}
+
+// Rate limiting functionality
+class RateLimitService {
+  private static readonly MAX_DAILY_REQUESTS = 5
+
+  static getDailyUsage(userId: string): DailyUsage {
+    const today = new Date().toDateString()
+    const key = `daily_requests_${userId}`
+    
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(key)
+      if (stored) {
+        const usage: DailyUsage = JSON.parse(stored)
+        // Reset if it's a new day
+        if (usage.date !== today) {
+          const newUsage: DailyUsage = {
+            userId,
+            date: today,
+            requests: 0,
+            maxRequests: this.MAX_DAILY_REQUESTS
+          }
+          localStorage.setItem(key, JSON.stringify(newUsage))
+          return newUsage
+        }
+        return usage
+      }
+    }
+
+    // Create new usage record
+    const newUsage: DailyUsage = {
+      userId,
+      date: today,
+      requests: 0,
+      maxRequests: this.MAX_DAILY_REQUESTS
+    }
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`daily_requests_${userId}`, JSON.stringify(newUsage))
+    }
+
+    return newUsage
+  }
+
+  static canMakeRequest(userId: string): boolean {
+    const usage = this.getDailyUsage(userId)
+    return usage.requests < usage.maxRequests
+  }
+
+  static incrementUsage(userId: string): DailyUsage {
+    const usage = this.getDailyUsage(userId)
+    usage.requests += 1
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`daily_requests_${userId}`, JSON.stringify(usage))
+    }
+
+    return usage
+  }
+
+  static getRemainingRequests(userId: string): number {
+    const usage = this.getDailyUsage(userId)
+    return Math.max(0, usage.maxRequests - usage.requests)
+  }
 }
 
 export default function Home() {
@@ -21,6 +104,11 @@ export default function Home() {
   const [url, setUrl] = useState('')
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  
+  // Auth states
+  const [user, setUser] = useState<User | null>(null)
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [dailyUsage, setDailyUsage] = useState<DailyUsage | null>(null)
 
   useEffect(() => {
     setIsClient(true)
@@ -29,10 +117,22 @@ export default function Home() {
   useEffect(() => {
     if (isClient) {
       try {
-        const savedDocuments = localStorage.getItem('documents')
-        if (savedDocuments) {
-          const parsed = JSON.parse(savedDocuments)
-          setDocuments(parsed)
+        // Load user from localStorage (set by the new auth system)
+        const storedUser = localStorage.getItem('user')
+        if (storedUser) {
+          const currentUser = JSON.parse(storedUser)
+          setUser(currentUser)
+
+          // Load user's documents
+          const savedDocuments = localStorage.getItem(`documents_${currentUser.id}`)
+          if (savedDocuments) {
+            const parsed = JSON.parse(savedDocuments)
+            setDocuments(parsed)
+          }
+          
+          // Load usage
+          const usage = RateLimitService.getDailyUsage(currentUser.id)
+          setDailyUsage(usage)
         }
         
         // Load saved theme
@@ -50,9 +150,9 @@ export default function Home() {
   }, [isClient])
 
   const saveDocuments = (newDocuments: Document[]) => {
-    if (isClient) {
+    if (isClient && user) {
       try {
-        localStorage.setItem('documents', JSON.stringify(newDocuments))
+        localStorage.setItem(`documents_${user.id}`, JSON.stringify(newDocuments))
       } catch (error) {
         console.error('Error saving documents:', error)
       }
@@ -67,7 +167,66 @@ export default function Home() {
     }
   }
 
+  const handleSignOut = async () => {
+    try {
+      // Call logout API
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch (error) {
+      console.error('Logout error:', error)
+    }
+    
+    // Clear local state
+    localStorage.removeItem('user')
+    setUser(null)
+    setDocuments([])
+    setDailyUsage(null)
+  }
+
+  const handleAuthSuccess = () => {
+    // Get user from localStorage (set by AuthModal after successful login)
+    const storedUser = localStorage.getItem('user')
+    if (storedUser) {
+      const currentUser = JSON.parse(storedUser)
+      setUser(currentUser)
+      
+      // Load user's documents
+      const savedDocuments = localStorage.getItem(`documents_${currentUser.id}`)
+      if (savedDocuments) {
+        const parsed = JSON.parse(savedDocuments)
+        setDocuments(parsed)
+      }
+      
+      // Load usage
+      const usage = RateLimitService.getDailyUsage(currentUser.id)
+      setDailyUsage(usage)
+    }
+  }
+
+  const checkRateLimit = (): boolean => {
+    if (!user) {
+      alert('Please sign in to use this feature')
+      setShowAuthModal(true)
+      return false
+    }
+
+    if (!RateLimitService.canMakeRequest(user.id)) {
+      alert('You have reached your daily limit of 5 requests. Please try again tomorrow.')
+      return false
+    }
+
+    return true
+  }
+
+  const incrementUsage = () => {
+    if (user) {
+      const newUsage = RateLimitService.incrementUsage(user.id)
+      setDailyUsage(newUsage)
+    }
+  }
+
   const handleFileUpload = async (file: File) => {
+    if (!checkRateLimit()) return
+
     if (file.type !== 'application/pdf') {
       alert('Please upload a PDF file')
       return
@@ -115,9 +274,15 @@ export default function Home() {
         throw new Error('Invalid response format from server')
       }
 
+      // Add userId to the document
+      result.userId = user!.id
+
       const newDocuments = [result, ...documents]
       setDocuments(newDocuments)
       saveDocuments(newDocuments)
+      
+      // Increment usage count
+      incrementUsage()
       
       console.log('Document processed successfully:', result.id)
     } catch (error) {
@@ -131,6 +296,7 @@ export default function Home() {
   const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!url.trim()) return
+    if (!checkRateLimit()) return
 
     setIsProcessing(true)
     try {
@@ -156,10 +322,15 @@ export default function Home() {
       }
 
       const result = JSON.parse(responseText)
+      result.userId = user!.id
+
       const newDocuments = [result, ...documents]
       setDocuments(newDocuments)
       saveDocuments(newDocuments)
       setUrl('')
+      
+      // Increment usage count
+      incrementUsage()
     } catch (error) {
       console.error('Error processing URL:', error)
       alert(`Error processing URL: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -171,6 +342,7 @@ export default function Home() {
   const handleYouTubeSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!youtubeUrl.trim()) return
+    if (!checkRateLimit()) return
 
     setIsProcessing(true)
     try {
@@ -202,10 +374,15 @@ export default function Home() {
       }
 
       const result = JSON.parse(responseText)
+      result.userId = user!.id
+
       const newDocuments = [result, ...documents]
       setDocuments(newDocuments)
       saveDocuments(newDocuments)
       setYoutubeUrl('')
+      
+      // Increment usage count
+      incrementUsage()
       
       console.log('YouTube video processed successfully:', result.title)
     } catch (error) {
@@ -250,8 +427,46 @@ export default function Home() {
         {/* Header */}
         <div className="text-center mb-12">
           <div className="flex justify-between items-center mb-8">
-            <div></div>
-            <h1 className={`text-4xl font-bold mb-4 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>SumIT</h1>
+            {/* User info or sign in button */}
+            <div className="flex items-center space-x-4">
+              {user ? (
+                <div className="flex items-center space-x-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                    theme === 'dark' ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="text-left">
+                    <p className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                      {user.name}
+                    </p>
+                    <p className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {user.email}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleSignOut}
+                    className={`text-sm px-3 py-1 rounded-md transition-colors ${
+                      theme === 'dark'
+                        ? 'text-gray-400 hover:text-gray-300 border border-gray-600 hover:bg-gray-800'
+                        : 'text-gray-500 hover:text-gray-700 border border-gray-300 hover:bg-gray-100'
+                    }`}
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  Sign In
+                </button>
+              )}
+            </div>
+
+            <h1 className={`text-4xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>SumIT</h1>
+            
             <button
               onClick={toggleTheme}
               className={`p-2 rounded-lg transition-colors ${
@@ -272,9 +487,22 @@ export default function Home() {
               )}
             </button>
           </div>
+          
           <p className={`text-lg max-w-2xl mx-auto ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
             Transform any content into intelligent insights. Upload PDFs, analyze websites, or process YouTube videos with AI-powered summarization.
           </p>
+          
+          {!user && (
+            <div className={`mt-4 p-4 rounded-lg ${
+              theme === 'dark' 
+                ? 'bg-yellow-900/20 text-yellow-300 border border-yellow-800' 
+                : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+            }`}>
+              <p className="text-sm">
+                🔒 Please sign in to start processing documents. Free users get 5 requests per day.
+              </p>
+            </div>
+          )}
           
           <button
             onClick={testAPI}
@@ -290,7 +518,16 @@ export default function Home() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Upload Section */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-6">
+            {/* Usage Indicator */}
+            {user && dailyUsage && (
+              <UsageIndicator 
+                userId={user.id} 
+                theme={theme}
+                onUsageUpdate={setDailyUsage}
+              />
+            )}
+
             <div className={`rounded-xl shadow-sm border p-6 ${
               theme === 'dark' 
                 ? 'bg-gray-800 border-gray-700' 
@@ -302,7 +539,9 @@ export default function Home() {
               <div className="mb-6">
                 <label className={`block text-sm font-medium mb-3 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>Upload PDF</label>
                 <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-                  theme === 'dark'
+                  !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)
+                    ? 'opacity-50 cursor-not-allowed'
+                    : theme === 'dark'
                     ? 'border-gray-600 hover:border-gray-500'
                     : 'border-gray-300 hover:border-gray-400'
                 }`}>
@@ -315,12 +554,12 @@ export default function Home() {
                     }}
                     className="hidden"
                     id="file-upload"
-                    disabled={isProcessing}
+                    disabled={isProcessing || !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)}
                   />
                   <label
                     htmlFor="file-upload"
                     className={`cursor-pointer inline-flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${
-                      isProcessing 
+                      isProcessing || !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)
                         ? 'bg-gray-400 cursor-not-allowed text-white' 
                         : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
@@ -328,9 +567,11 @@ export default function Home() {
                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    {isProcessing ? 'Processing...' : 'Choose File'}
+                    {isProcessing ? 'Processing...' : !user ? 'Sign In Required' : 'Choose File'}
                   </label>
-                  <p className={`mt-2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>PDF files only</p>
+                  <p className={`mt-2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    {!user ? 'Sign in to upload PDFs' : 'PDF files only'}
+                  </p>
                 </div>
               </div>
 
@@ -342,19 +583,19 @@ export default function Home() {
                     type="url"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://example.com/article"
+                    placeholder={!user ? "Sign in to process URLs" : "https://example.com/article"}
                     className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                       theme === 'dark'
                         ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
                         : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                     }`}
-                    disabled={isProcessing}
+                    disabled={isProcessing || !user}
                   />
                   <button
                     type="submit"
-                    disabled={isProcessing || !url.trim()}
+                    disabled={isProcessing || !url.trim() || !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)}
                     className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
-                      isProcessing || !url.trim()
+                      isProcessing || !url.trim() || !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)
                         ? 'bg-gray-400 cursor-not-allowed text-white'
                         : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
@@ -364,6 +605,8 @@ export default function Home() {
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                         Processing...
                       </div>
+                    ) : !user ? (
+                      'Sign In Required'
                     ) : (
                       'Process URL'
                     )}
@@ -379,19 +622,19 @@ export default function Home() {
                     type="url"
                     value={youtubeUrl}
                     onChange={(e) => setYoutubeUrl(e.target.value)}
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder={!user ? "Sign in to process videos" : "https://www.youtube.com/watch?v=..."}
                     className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent ${
                       theme === 'dark'
                         ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
                         : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                     }`}
-                    disabled={isProcessing}
+                    disabled={isProcessing || !user}
                   />
                   <button
                     type="submit"
-                    disabled={isProcessing || !youtubeUrl.trim()}
+                    disabled={isProcessing || !youtubeUrl.trim() || !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)}
                     className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
-                      isProcessing || !youtubeUrl.trim()
+                      isProcessing || !youtubeUrl.trim() || !user || (dailyUsage && dailyUsage.requests >= dailyUsage.maxRequests)
                         ? 'bg-gray-400 cursor-not-allowed text-white'
                         : 'bg-red-600 hover:bg-red-700 text-white'
                     }`}
@@ -401,13 +644,15 @@ export default function Home() {
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                         Processing...
                       </div>
+                    ) : !user ? (
+                      'Sign In Required'
                     ) : (
                       'Process Video'
                     )}
                   </button>
                 </form>
                 <p className={`mt-2 text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Video must have captions available
+                  {!user ? 'Sign in to process YouTube videos' : 'Video must have captions available'}
                 </p>
               </div>
             </div>
@@ -421,7 +666,9 @@ export default function Home() {
                 : 'bg-white border-gray-200'
             }`}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className={`text-xl font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Documents</h2>
+                <h2 className={`text-xl font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                  {user ? 'Your Documents' : 'Documents'}
+                </h2>
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                   theme === 'dark'
                     ? 'bg-gray-700 text-gray-300'
@@ -431,7 +678,21 @@ export default function Home() {
                 </span>
               </div>
               
-              {documents.length === 0 ? (
+              {!user ? (
+                <div className="text-center py-12">
+                  <svg className={`w-16 h-16 mx-auto mb-4 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  <h3 className={`text-lg font-medium mb-2 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Sign in to view documents</h3>
+                  <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>Your processed documents will appear here after signing in</p>
+                  <button
+                    onClick={() => setShowAuthModal(true)}
+                    className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  >
+                    Sign In Now
+                  </button>
+                </div>
+              ) : documents.length === 0 ? (
                 <div className="text-center py-12">
                   <svg className={`w-16 h-16 mx-auto mb-4 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -507,6 +768,14 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={handleAuthSuccess}
+        theme={theme}
+      />
     </div>
   )
 }
