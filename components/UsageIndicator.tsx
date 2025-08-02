@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { RateLimitService, DailyUsage } from '@/lib/auth'
+import { RateLimitService, DailyUsage } from '@/lib/rateLimitService'
 
 interface UsageIndicatorProps {
   userId: string
