@@ -20,6 +20,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [url, setUrl] = useState('')
   const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
 
   useEffect(() => {
     setIsClient(true)
@@ -33,8 +34,17 @@ export default function Home() {
           const parsed = JSON.parse(savedDocuments)
           setDocuments(parsed)
         }
+        
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
+        if (savedTheme) {
+          setTheme(savedTheme)
+        } else {
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          setTheme(prefersDark ? 'dark' : 'light')
+        }
       } catch (error) {
-        console.error('Error loading documents:', error)
+        console.error('Error loading data:', error)
       }
     }
   }, [isClient])
@@ -46,6 +56,14 @@ export default function Home() {
       } catch (error) {
         console.error('Error saving documents:', error)
       }
+    }
+  }
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
+    if (isClient) {
+      localStorage.setItem('theme', newTheme)
     }
   }
 
@@ -216,29 +234,55 @@ export default function Home() {
 
   if (!isClient) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">SumIT</h1>
-          <p className="text-gray-600">Loading...</p>
+          <h1 className={`text-2xl font-semibold mb-2 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>SumIT</h1>
+          <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>Loading...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">SumIT</h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+          <div className="flex justify-between items-center mb-8">
+            <div></div>
+            <h1 className={`text-4xl font-bold mb-4 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>SumIT</h1>
+            <button
+              onClick={toggleTheme}
+              className={`p-2 rounded-lg transition-colors ${
+                theme === 'dark' 
+                  ? 'bg-gray-800 text-yellow-400 hover:bg-gray-700' 
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-300'
+              }`}
+              title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+            >
+              {theme === 'light' ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              )}
+            </button>
+          </div>
+          <p className={`text-lg max-w-2xl mx-auto ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
             Transform any content into intelligent insights. Upload PDFs, analyze websites, or process YouTube videos with AI-powered summarization.
           </p>
           
           <button
             onClick={testAPI}
-            className="mt-4 px-3 py-1 text-sm text-gray-500 hover:text-gray-700 border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
+            className={`mt-4 px-3 py-1 text-sm rounded-md transition-colors ${
+              theme === 'dark'
+                ? 'text-gray-400 hover:text-gray-300 border border-gray-600 hover:bg-gray-800'
+                : 'text-gray-500 hover:text-gray-700 border border-gray-300 hover:bg-gray-100'
+            }`}
           >
             Test API
           </button>
@@ -247,13 +291,21 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Upload Section */}
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">Add Content</h2>
+            <div className={`rounded-xl shadow-sm border p-6 ${
+              theme === 'dark' 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            }`}>
+              <h2 className={`text-xl font-semibold mb-6 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Add Content</h2>
               
               {/* PDF Upload */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-3">Upload PDF</label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
+                <label className={`block text-sm font-medium mb-3 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>Upload PDF</label>
+                <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                  theme === 'dark'
+                    ? 'border-gray-600 hover:border-gray-500'
+                    : 'border-gray-300 hover:border-gray-400'
+                }`}>
                   <input
                     type="file"
                     accept=".pdf"
@@ -278,20 +330,24 @@ export default function Home() {
                     </svg>
                     {isProcessing ? 'Processing...' : 'Choose File'}
                   </label>
-                  <p className="mt-2 text-sm text-gray-500">PDF files only</p>
+                  <p className={`mt-2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>PDF files only</p>
                 </div>
               </div>
 
               {/* URL Input */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-3">Website URL</label>
+                <label className={`block text-sm font-medium mb-3 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>Website URL</label>
                 <form onSubmit={handleUrlSubmit} className="space-y-3">
                   <input
                     type="url"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     placeholder="https://example.com/article"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      theme === 'dark'
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                    }`}
                     disabled={isProcessing}
                   />
                   <button
@@ -317,14 +373,18 @@ export default function Home() {
 
               {/* YouTube Input */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">YouTube Video</label>
+                <label className={`block text-sm font-medium mb-3 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>YouTube Video</label>
                 <form onSubmit={handleYouTubeSubmit} className="space-y-3">
                   <input
                     type="url"
                     value={youtubeUrl}
                     onChange={(e) => setYoutubeUrl(e.target.value)}
                     placeholder="https://www.youtube.com/watch?v=..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent ${
+                      theme === 'dark'
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                    }`}
                     disabled={isProcessing}
                   />
                   <button
@@ -346,7 +406,7 @@ export default function Home() {
                     )}
                   </button>
                 </form>
-                <p className="mt-2 text-xs text-gray-500">
+                <p className={`mt-2 text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                   Video must have captions available
                 </p>
               </div>
@@ -355,34 +415,50 @@ export default function Home() {
 
           {/* Documents Section */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className={`rounded-xl shadow-sm border p-6 ${
+              theme === 'dark' 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            }`}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">Documents</h2>
-                <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">
+                <h2 className={`text-xl font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Documents</h2>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  theme === 'dark'
+                    ? 'bg-gray-700 text-gray-300'
+                    : 'bg-gray-100 text-gray-700'
+                }`}>
                   {documents.length}
                 </span>
               </div>
               
               {documents.length === 0 ? (
                 <div className="text-center py-12">
-                  <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className={`w-16 h-16 mx-auto mb-4 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No documents yet</h3>
-                  <p className="text-gray-500">Upload your first document to get started</p>
+                  <h3 className={`text-lg font-medium mb-2 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>No documents yet</h3>
+                  <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>Upload your first document to get started</p>
                 </div>
               ) : (
                 <div className="space-y-4 max-h-96 overflow-y-auto">
                   {documents.map((doc) => (
                     <div
                       key={doc.id}
-                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                      className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
+                        theme === 'dark'
+                          ? 'border-gray-600 hover:bg-gray-700'
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
                     >
                       <div className="flex justify-between items-start mb-3">
-                        <h3 className="font-semibold text-gray-900 flex-1">{doc.title}</h3>
+                        <h3 className={`font-semibold flex-1 ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{doc.title}</h3>
                         <button
                           onClick={() => handleDeleteDocument(doc.id)}
-                          className="text-gray-400 hover:text-red-500 ml-2 p-1"
+                          className={`ml-2 p-1 transition-colors ${
+                            theme === 'dark'
+                              ? 'text-gray-500 hover:text-red-400'
+                              : 'text-gray-400 hover:text-red-500'
+                          }`}
                           title="Delete document"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -391,7 +467,7 @@ export default function Home() {
                         </button>
                       </div>
                       
-                      <p className="text-gray-600 mb-3 text-sm">{doc.summary}</p>
+                      <p className={`mb-3 text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>{doc.summary}</p>
                       
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full">

@@ -31,6 +31,19 @@ body {
   background: #94a3b8;
 }
 
+/* Dark mode scrollbar */
+.bg-gray-900 .overflow-y-auto::-webkit-scrollbar-track {
+  background: #374151;
+}
+
+.bg-gray-900 .overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #6b7280;
+}
+
+.bg-gray-900 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
 /* Focus states for accessibility */
 input:focus,
 button:focus {
